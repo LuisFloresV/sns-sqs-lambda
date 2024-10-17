@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  # 1. SNS Topic
+  MySNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: MySNSTopic
+
+  # 2. SQS Queue
+  MySQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: MySQSQueue
+
+  # 3. SNS Subscription (SNS -> SQS)
+  MySNSToSQSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref MySNSTopic
+      Protocol: sqs
+      Endpoint: !GetAtt MySQSQueue.Arn
+
+  # 4. Lambda Function that processes SQS messages
+  MyLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: process-message
+      Handler: app.handler  # Assuming the Lambda code is in index.js
+      Runtime: nodejs18.x
+      CodeUri: ./process-message # Directory where your Lambda code is stored
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt MySQSQueue.Arn
+      Policies:
+        - AWSLambdaBasicExecutionRole  # Basic Lambda permissions
+        - Statement:
+            Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+            Resource: !GetAtt MySQSQueue.Arn
+
+  # 5. IAM Role for the SQS Queue to allow SNS publishing to it
+  SQSPolicyForSNSTopic:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref MySQSQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: "sqs:SendMessage"
+            Resource: !GetAtt MySQSQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref MySNSTopic
